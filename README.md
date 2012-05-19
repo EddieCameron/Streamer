@@ -25,9 +25,13 @@ v0.9 - Initial public release
 - Parses status, username, location and hashtags from the live feed. May ignore tweets with unusual characters in the status.
 
 **************
+v1.0 - Generally useable release
+- Full support for oAuth via passcode authorisation. Users can now use their own accounts in your app
+- Added the follow query parameter, for filtering all tweets in reply/RTing a certain person
+- Fixed the JSON parser to correctly unescape special characters & unicode
+- Some other minor reliability/error reporting fixes
 
 TODO:
 - add more query options
-- support for getting user tokens from OAuth
-- this will open up possibility for Twitter REST API access (post tweets, access a users timeline, etc)
+- add Twitter REST API access (post tweets, access a users timeline, etc)
 - places support (currently only supports coordinates)
