@@ -83,7 +83,34 @@ namespace Streamer
 				else if(str[0] == '"') 
 				{
 	                type = Type.STRING;
-	                this.str = str.Substring(1, str.Length - 2);//.Replace( @"\", "" );
+					
+					// unescape backslashes and unicode
+					System.Text.StringBuilder sb = new System.Text.StringBuilder();
+					for ( int i = 1; i < str.Length - 1; i++ )
+					{
+						char thisChar = str[i];
+						if ( thisChar == '\\' )
+						{
+							// backslash
+							i++;
+							if ( i < str.Length - 5 && str[i] == 'u' )
+							{
+								// unicode
+								byte[] uniBytes = new byte[2];
+								uniBytes[1] = Convert.ToByte ( str[++i].ToString() + str[++i], 16 );
+								uniBytes[0] = Convert.ToByte ( str[++i].ToString () + str[++i], 16 );
+								sb.Append ( System.Text.UTF8Encoding.UTF8.GetChars ( uniBytes ) );
+							}
+							else if ( i < str.Length - 1 )
+								sb.Append ( str[i] );
+							else
+								sb.Append ( '\\' );
+						}
+						else   // plain char
+							sb.Append( thisChar );
+					}
+					
+	                this.str = sb.ToString ();
 	            } 
 				else 
 				{

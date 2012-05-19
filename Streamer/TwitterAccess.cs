@@ -26,18 +26,10 @@ namespace Streamer
 		private const string streamFilterURL = "https://stream.twitter.com/1/statuses/filter.json";
 		private const string streamSampleURL = "https://stream.twitter.com/1/statuses/sample.json";
 		
-		private string consumerKey = "zFDzzVXJewaxd2ZwfagBg";					// register on dev.twitter.com to get
-		private string consumerSecret = "XcIeaCsyXQyFvmF6SicBgrrDYjSHMCjGH2LLH7ecRI";	// these for your app
-		private const string signatureMethod = "HMAC-SHA1";
-		private const string version = "1.0";
-		
-		public bool isAuthed;
-		private string token = "158618391-231q5UomSLpR3lVCLPOG3iqaKWW7vwtvUcdi69UU";	// generate an access token for yourself
-		private string tokenSecret = "E8jsgHpYA3sustsBvHneHFu5B293IaaWtbS2fpvw0E";	// at dev.twitter.com
-		
 		// for the streaming API, you can use basic authentication...for now...
 		private string username;
 		private string password;
+		OAuth oAuth;
 		
 		public enum ApiMethod{ StreamFilter, StreamSample };
 		public ApiMethod apiMethod = TwitterAccess.ApiMethod.StreamFilter;
@@ -63,7 +55,7 @@ namespace Streamer
 		private WebRequest connectingRequest;
 		
 		// URL encode strings, since Twitter doesn't like .Net URL encoding
-		private static string UrlEncode( string toEncode ) 
+		public static string UrlEncode( string toEncode ) 
 		{
 	        StringBuilder toRet = new StringBuilder();
 			string acceptedChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~";
@@ -83,16 +75,12 @@ namespace Streamer
 			tweetStringQueue = new Queue<string>();
 			queries = new Dictionary<string,TwitterQuery>();
 			
-			isAuthed = token != "" && tokenSecret != "";
+			oAuth = new OAuth();
 			
 			tweetParser = new DecodeStream( tweetStringQueue );
 			tweets = tweetParser.tweets;
 			tweetParser.isParsingPaused = true;
-		}
-		
-		
-		// To add: user auth via OAuth
-		
+		}		
 		
 		// Add and remove parameters (to add more)
 		public void AddQueryParameter( TwitterQuery query )
@@ -122,8 +110,52 @@ namespace Streamer
 			this.password = password;
 		}
 		
+		public string GetOAuthString()
+		{
+			return oAuth.GetUserAuth ();
+		}
 		
-		// Connect with already given parameters
+		/// <summary>
+		/// Tries to authorise with saved OAuth credentials
+		/// </summary>
+		/// <returns>
+		/// If auth was successful
+		/// </returns>
+		/// <param name='savedAuth'>
+		/// String from previous GetOAuthString call
+		/// </param>
+		public bool OAuthWithString( string savedAuth )
+		{
+			return oAuth.AuthoriseFromSave ( savedAuth );
+		}
+		
+		public bool IsOAuthed()
+		{
+			return oAuth.status == OAuthStatus.Authorised;
+		}
+		
+		public void GetOAuthURL( Action<string> receiveUrlCallback )
+		{
+			oAuth.StartOAuthRequest ( "https://api.twitter.com/oauth/request_token", "https://api.twitter.com/oauth/authorize", receiveUrlCallback );
+		}
+		
+		/// <summary>
+		/// Call after user has entered passcode from twitter.com to authorise this app
+		/// </summary>
+		/// <param name='passcode'>
+		/// Passcode. User can get at url given back by StartOAuthRequest
+		/// </param>
+		public void GetUserTokens( string passcode )
+		{
+			oAuth.GetAccessTokens( "https://api.twitter.com/oauth/access_token", passcode );
+		}
+		
+		/// /// <summary>
+		/// Connect with preset parameters
+		/// </summary>
+		/// <param name='useBasicAuth'>
+		/// Use basic auth(streaming only) CAUTION: Twitter may deprecate this soon
+		/// </param>
 		public void Connect( bool useBasicAuth )
 		{
 			// if attempting connection, cancel
@@ -134,26 +166,30 @@ namespace Streamer
 			string[,] parameterStrings = new string[queries.Count,2];
 			StringBuilder postString = new StringBuilder();
 			
-			int i = 0;
-			foreach ( TwitterQuery query in queries.Values )
+			if ( queries.Count > 0 )
 			{
-				string key = UrlEncode( query.GetKey() );
-				string parameter = UrlEncode ( query.GetParameter() );
-				parameterStrings[i,0] = key;
-				parameterStrings[i,1] = parameter;
-				i++;
-				
-				postString.Append ( key + "=" + parameter + "&" );
+				int i = 0;
+				foreach ( TwitterQuery query in queries.Values )
+				{
+					string key = UrlEncode( query.GetKey() );
+					string parameter = UrlEncode ( query.GetParameter() );
+					parameterStrings[i,0] = key;
+					parameterStrings[i,1] = parameter;
+					i++;
+					
+					postString.Append ( key + "=" + parameter + "&" );
+				}
+				postString = postString.Remove ( postString.Length - 1, 1 );
 			}
-			postString = postString.Remove ( postString.Length - 1, 1 );
 			
 			// make and authorise webrequest
-			connectingRequest = WebRequest.Create( streamFilterURL );
+			string url = queries.Count == 0 ? streamSampleURL : streamFilterURL;
+			connectingRequest = WebRequest.Create( url );
 			
 			if ( useBasicAuth )
 				connectingRequest.Credentials = new NetworkCredential( username, password );
-			else if ( isAuthed )
-				connectingRequest.Headers.Add ( HttpRequestHeader.Authorization, MakeAuthorisation( parameterStrings ) );
+			else if ( IsOAuthed() )
+				connectingRequest.Headers.Add ( HttpRequestHeader.Authorization, oAuth.AuthoriseRequest( parameterStrings, url ) );
 			else
 			{
 	#if FOR_UNITY
@@ -298,57 +334,6 @@ namespace Streamer
 			}
 			
 			return response;
-		}
-		
-		private string MakeAuthorisation( string[,] queryParameters )
-		{
-			// make nOnce
-			StringBuilder no = new StringBuilder( 32 );
-			string alphanumeric = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890";
-			System.Random random = new System.Random();
-			for ( int i = 0; i < 32; i++ )
-				no.Append( alphanumeric[ random.Next ( alphanumeric.Length ) ] );
-			
-			// set timestamp
-			string timeStamp = ( (int)( System.DateTime.UtcNow - new System.DateTime( 1970, 1, 1 ) ).TotalSeconds ).ToString();
-			
-			// sort all the parameters to be signed
-			SortedDictionary<string, string> properties = new SortedDictionary<string, string>();
-			for( int i = 0; i < queryParameters.GetLength( 0 ); i++ )
-				properties.Add ( queryParameters[i,0], queryParameters[i,1] );
-			
-			properties.Add ( UrlEncode ( "oauth_consumer_key" ), UrlEncode( consumerKey ) );
-			properties.Add ( UrlEncode( "oauth_nonce" ), no.ToString () );
-			properties.Add ( UrlEncode( "oauth_signature_method" ), UrlEncode( signatureMethod ) );
-			properties.Add ( UrlEncode( "oauth_timestamp" ), timeStamp );
-			properties.Add ( "oauth_token", UrlEncode ( token ) );
-			properties.Add ( "oauth_version", UrlEncode ( version ) );
-			
-			// make parameter string
-			StringBuilder parameters = new StringBuilder();
-			foreach( KeyValuePair<string, string> kv in properties )
-				parameters.Append ( kv.Key + "=" +  kv.Value + "&" );
-			parameters.Remove ( parameters.Length - 1, 1 );
-			
-			string postParameters =  "POST&" + UrlEncode ( streamFilterURL ) + "&" + UrlEncode ( parameters.ToString () );
-	
-			// sign parameter string
-			byte[] sigBase = UTF8Encoding.UTF8.GetBytes (postParameters);
-			MemoryStream ms = new MemoryStream();
-			ms.Write (sigBase, 0, sigBase.Length );
-			
-			byte[] key = UTF8Encoding.UTF8.GetBytes ( UrlEncode ( consumerSecret ) + "&" + UrlEncode( tokenSecret ) );
-			System.Security.Cryptography.HMACSHA1 sha1 = new System.Security.Cryptography.HMACSHA1( key );
-			byte[] hashBytes = sha1.ComputeHash ( sigBase );
-			string signature = System.Convert.ToBase64String( hashBytes );
-			
-			// construct auth header
-			string header = "OAuth " + "oauth_consumer_key=\"" + UrlEncode ( consumerKey ) + "\",oauth_nonce=\"" + UrlEncode ( no.ToString() )
-					+ "\",oauth_signature=\"" + UrlEncode ( signature ) + "\",oauth_signature_method=\"" + UrlEncode ( signatureMethod )
-					+ "\",oauth_timestamp=\"" + UrlEncode ( timeStamp ) + "\",oauth_token=\"" + UrlEncode ( token )
-					+ "\",oauth_version=\"" + UrlEncode ( version ) + "\"";
-			
-			return header;
 		}
 	}
 }

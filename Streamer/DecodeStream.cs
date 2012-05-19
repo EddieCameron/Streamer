@@ -73,6 +73,20 @@ namespace Streamer
 				Thread.Sleep ( 100 );
 			}		
 		}
+		
+		/// <summary>
+		/// Remove extra escape chars from the string
+		/// </summary>
+		/// <returns>
+		/// The string.
+		/// </returns>
+		/// <param name='urlString'>
+		/// URL string.
+		/// </param>
+		public static string CleanString( string toClean )
+		{
+			return toClean.Replace ( @"\", @"" );
+		}
 	}
 	
 	// To be expanded as needed
@@ -82,6 +96,8 @@ namespace Streamer
 		
 		private JSONObject user;
 		public string userName = "";
+		public string fullName = "";		
+		public string avatarURL = "";
 		
 		private JSONObject location;
 		public Coordinates[] coords;	// single entry means point, multiple means bounding box
@@ -101,6 +117,10 @@ namespace Streamer
 			
 			JSONObject name = user.GetProperty ( "screen_name" );
 			userName = name.str;
+			JSONObject fullNameObj = user.GetProperty ( "name" );
+			fullName = fullNameObj.str;
+			JSONObject avatarObj = user.GetProperty ( "profile_image_url" );
+			avatarURL = DecodeStream.CleanString ( avatarObj.str );
 			
 			location = jsonTweet.GetProperty( "geo" );
 			if ( location.type == JSONObject.Type.NULL )
